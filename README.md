@@ -4,8 +4,6 @@ Cours et projet des points **33** et **34** :
 
 > Création d’un Shell Linux avec Node.js : à la découverte de la ligne de commande et du système d’exploitation Linux
 
-Deux séances d’atelier (IW), un shell qui fonctionne, un cours original.
-
 ## Démarrer
 
 Prérequis : Node.js 18+.
