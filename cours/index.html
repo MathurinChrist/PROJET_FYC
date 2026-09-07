@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NYSH — Cours IW 33 &amp; 34</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <p class="brand">nysh</p>
+      <p class="brand-sub">Création d’un shell Linux avec Node.js</p>
+      <nav>
+        <h2>Ouverture</h2>
+        <a href="#accueil">Le contrat du cours</a>
+        <h2>Séance 33</h2>
+        <a href="#s33-1">1. Qu’est-ce qu’un shell ?</a>
+        <a href="#s33-2">2. Linux vu du terminal</a>
+        <a href="#s33-3">3. Processus &amp; fork/exec</a>
+        <a href="#s33-4">4. Node.js et le système</a>
+        <a href="#s33-5">5. TP — La boucle REPL</a>
+        <a href="#s33-6">6. TP — Tokenizer</a>
+        <a href="#s33-7">7. TP — Commandes internes</a>
+        <a href="#s33-8">8. TP — Commandes externes</a>
+        <a href="#s33-9">9. Bilan de la séance 33</a>
+        <h2>Séance 34</h2>
+        <a href="#s34-1">1. Carte du code</a>
+        <a href="#s34-2">2. Descripteurs 0, 1, 2</a>
+        <a href="#s34-3">3. Redirections</a>
+        <a href="#s34-4">4. Pipes</a>
+        <a href="#s34-5">5. Environnement &amp; expansions</a>
+        <a href="#s34-6">6. && || ; et l’arrière-plan</a>
+        <a href="#s34-7">7. Signaux, historique, complétion</a>
+        <a href="#s34-8">8. TP final</a>
+        <a href="#s34-9">9. Au-delà de nysh</a>
+      </nav>
+    </aside>
+    <main>
+      <article data-id="accueil" class="visible">
+        <p class="kicker">IW 33 &amp; 34 · cours original</p>
+        <h1>Création d’un shell Linux avec Node.js</h1>
+        <p class="meta">À la découverte de la ligne de commande et du système d’exploitation Linux. Deux séances, un seul fil : écrire <strong>nysh</strong>, un shell qui marche vraiment.</p>
+        <p>Un shell n’est pas un « terminal coloré ». C’est le programme qui lit ce que tu tapes, le comprend, lance d’autres programmes, et recable stdin, stdout et stderr. En le reconstruisant, on touche au métal de Linux sans quitter JavaScript.</p>
+        <h2>Objectifs</h2>
+        <ul>
+          <li>Comprendre le modèle Unix : processus, fichiers, descripteurs, PATH.</li>
+          <li>Écrire un REPL Node.js qui se comporte comme un petit bash.</li>
+          <li>Distinguer commande interne et commande externe — et pourquoi <code>cd</code> ne peut pas être un processus fils.</li>
+          <li>Implémenter pipes, redirections, variables, opérateurs <code>&amp;&amp;</code> / <code>||</code>.</li>
+        </ul>
+        <h2>Organisation</h2>
+        <table>
+          <thead><tr><th>Séance</th><th>Durée</th><th>Livrable</th></tr></thead>
+          <tbody>
+            <tr><td>33 — Fonder le shell</td><td>~4 h</td><td>REPL + builtins + spawn</td></tr>
+            <tr><td>34 — Un vrai shell</td><td>~4 h</td><td>Pipes, redirs, env, signaux</td></tr>
+          </tbody>
+        </table>
+        <h2>Lancer le projet</h2>
+        <pre><code>node src/index.js          # shell interactif
+node src/index.js -c "pwd" # une commande
+npm test                   # 21 tests
+npm run cours              # ce cours sur http://127.0.0.1:3340</code></pre>
+        <div class="callout lab">
+          <strong class="label">Méthode</strong>
+          Chaque séance alterne une idée Linux et un TP dans le code. Ne sautez pas le « pourquoi » : le code sans le modèle mental n’est qu’un tutoriel de <code>child_process</code>.
+        </div>
+      </article>
+
+      <article data-id="s33-1">
+        <p class="kicker">Séance 33 · leçon 1</p>
+        <h1>Qu’est-ce qu’un shell ?</h1>
+        <p>Quand tu ouvres « le terminal », tu vois trois couches empilées :</p>
+        <ol>
+          <li><strong>Le terminal</strong> (fenêtre, tty) : affiche des caractères, capte le clavier.</li>
+          <li><strong>Le shell</strong> (bash, zsh, nysh) : interprète les lignes, lance des programmes.</li>
+          <li><strong>Les programmes</strong> (<code>ls</code>, <code>git</code>, <code>node</code>) : font le travail.</li>
+        </ol>
+        <p><code>ls</code> n’est pas une fonction du shell. C’est un binaire, souvent <code>/usr/bin/ls</code>. Le shell le trouve grâce à <code>PATH</code>, le démarre, et lui donne tes arguments.</p>
+        <pre><code>$ type ls
+ls is /usr/bin/ls
+
+$ type cd
+cd is a shell builtin</code></pre>
+        <p>Cette distinction est le cœur du cours. <code>ls</code> peut vivre dans un autre processus. <code>cd</code> doit changer le répertoire <em>du shell lui-même</em>.</p>
+        <div class="callout piege">
+          <strong class="label">Piège</strong>
+          Si tu lances <code>cd</code> avec <code>child_process.spawn</code>, le fils change de dossier puis meurt. Le père n’a pas bougé. Le prompt reste au même endroit. C’est le premier test de maturité d’un shell.
+        </div>
+      </article>
+
+      <article data-id="s33-2">
+        <p class="kicker">Séance 33 · leçon 2</p>
+        <h1>Linux vu du terminal</h1>
+        <p>Linux expose le monde comme des fichiers. Un dossier, un disque, un pipe, même le clavier : un descripteur, un chemin, des permissions.</p>
+        <table>
+          <thead><tr><th>Concept</th><th>Ce que tu en vois</th></tr></thead>
+          <tbody>
+            <tr><td>Répertoire courant</td><td><code>pwd</code>, variable <code>PWD</code></td></tr>
+            <tr><td>Home</td><td><code>~</code>, <code>$HOME</code></td></tr>
+            <tr><td>PATH</td><td>liste de dossiers où chercher les binaires</td></tr>
+            <tr><td>Permissions</td><td>lire / écrire / exécuter (rwx)</td></tr>
+            <tr><td>Environnement</td><td>paires <code>NOM=valeur</code> héritées par les fils</td></tr>
+          </tbody>
+        </table>
+        <p>Une commande tapée est une phrase :</p>
+        <pre><code>ls -la ./src</code></pre>
+        <p>Le premier mot est le programme. Les suivants sont des arguments. Le shell ne « sait » pas ce qu’est <code>-la</code> : il le transmet tel quel à <code>ls</code>.</p>
+        <h2>Le prompt</h2>
+        <p>Convention POSIX : <code>user@host:chemin$</code> (le <code>#</code> est réservé à root). nysh reprend ce contrat, en vert et bleu, pour que le répertoire courant soit toujours visible — c’est ton ancrage mental.</p>
+      </article>
+
+      <article data-id="s33-3">
+        <p class="kicker">Séance 33 · leçon 3</p>
+        <h1>Processus, PID, fork et exec</h1>
+        <p>Un processus est un programme en train de s’exécuter : son PID, sa mémoire, ses descripteurs 0/1/2, son répertoire courant, son environnement.</p>
+        <p>Le modèle Unix classique :</p>
+        <div class="flow">1. fork()   → clone le shell
+2. exec()   → le clone devient `ls`
+3. wait()   → le shell attend la fin
+4. prompt   → on recommence</div>
+        <p>Node.js n’expose pas <code>fork</code>+<code>exec</code> à la main dans nysh. On utilise <code>child_process.spawn</code>, qui fait ce travail : créer un fils, lui passer argv, cwd, env, et les flux.</p>
+        <pre><code>import { spawn } from "node:child_process";
+
+const child = spawn("ls", ["-la"], {
+  cwd: ctx.cwd,
+  env: ctx.env,
+  stdio: "inherit",
+});
+child.on("close", (code) => { /* code de retour */ });</code></pre>
+        <p>Le <strong>code de retour</strong> vaut 0 si tout va bien, autre chose sinon. C’est ce que testeront <code>&amp;&amp;</code> et <code>||</code> à la séance 34. Convention : commande introuvable → <code>127</code>.</p>
+      </article>
+
+      <article data-id="s33-4">
+        <p class="kicker">Séance 33 · leçon 4</p>
+        <h1>Node.js parle au système</h1>
+        <p>Quatre modules suffisent pour un shell :</p>
+        <table>
+          <thead><tr><th>Module</th><th>Rôle dans nysh</th></tr></thead>
+          <tbody>
+            <tr><td><code>readline</code></td><td>lire une ligne, historique, complétion, Ctrl+C / Ctrl+D</td></tr>
+            <tr><td><code>child_process</code></td><td>lancer les binaires du PATH</td></tr>
+            <tr><td><code>fs</code> / <code>path</code></td><td>cd, redirections, globbing</td></tr>
+            <tr><td><code>process</code></td><td>env, cwd, stdin/stdout, PID, exit</td></tr>
+          </tbody>
+        </table>
+        <p>Architecture du projet — chaque fichier est une étape mentale :</p>
+        <div class="flow">ligne tapée
+    → tokenizer.js   (mots et opérateurs)
+    → parser.js      (arbre : pipelines, &&, redirs)
+    → expander.js    ($VAR, ~, *)
+    → executor.js    (spawn + builtins)
+    → prompt suivant</div>
+        <p>Tu n’as pas besoin d’une librairie. Node 18+ suffit. Moins de magie, plus de Linux.</p>
+      </article>
+
+      <article data-id="s33-5">
+        <p class="kicker">Séance 33 · TP 1</p>
+        <h1>La boucle REPL</h1>
+        <p>REPL : Read, Eval, Print, Loop. Un shell est un REPL dont « Eval » signifie « exécuter une ligne Unix ».</p>
+        <p>Fichier <code>src/shell.js</code> : <code>readline.createInterface</code>, un prompt, un handler <code>line</code>.</p>
+        <pre><code>const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  prompt: buildPrompt(ctx),
+});
+rl.on("line", async (line) => {
+  await runLine(line, ctx);
+  rl.setPrompt(buildPrompt(ctx));
+  rl.prompt();
+});</code></pre>
+        <div class="callout lab">
+          <strong class="label">À faire</strong>
+          Lance <code>node src/index.js</code>. Vérifie que Ctrl+D quitte, que <code>exit</code> quitte, qu’une ligne vide ne explose pas. Le prompt doit afficher <code>~</code> quand tu es dans <code>$HOME</code>.
+        </div>
+        <p>Le contexte <code>ctx</code> est l’état du shell : <code>cwd</code>, <code>env</code>, <code>lastStatus</code>, <code>aliases</code>. C’est l’équivalent de la mémoire de bash. Tout ce qui survit d’une ligne à l’autre vit là.</p>
+      </article>
+
+      <article data-id="s33-6">
+        <p class="kicker">Séance 33 · TP 2</p>
+        <h1>Découper la ligne : le tokenizer</h1>
+        <p>Avant de comprendre, il faut découper. <code>echo "hello world" | cat</code> n’est pas 5 mots : <code>hello world</code> est un seul argument, <code>|</code> n’est pas un argument, c’est un opérateur.</p>
+        <p>Règles que nysh reprend de POSIX :</p>
+        <ul>
+          <li>Les espaces séparent les mots, sauf entre quotes.</li>
+          <li><code>'...'</code> : littéral. <code>$USER</code> n’est pas expansé.</li>
+          <li><code>"..."</code> : les variables sont expansées, les espaces restent dans le mot.</li>
+          <li><code>#</code> commence un commentaire jusqu’à la fin de ligne.</li>
+          <li><code>|</code>, <code>||</code>, <code>&amp;&amp;</code>, <code>;</code>, <code>&gt;</code>, <code>&gt;&gt;</code>, <code>&lt;</code> sont des tokens à part.</li>
+        </ul>
+        <pre><code>tokenize(`echo "hi there" | cat > out`)
+// WORD echo | WORD hi there | PIPE | WORD cat | REDIR_OUT | WORD out</code></pre>
+        <div class="callout piege">
+          <strong class="label">Piège</strong>
+          <code>|</code> et <code>||</code> se ressemblent. Il faut regarder deux caractères en avant (lookahead). Même chose pour <code>&gt;</code> et <code>&gt;&gt;</code>, <code>&amp;</code> et <code>&amp;&amp;</code>.
+        </div>
+      </article>
+
+      <article data-id="s33-7">
+        <p class="kicker">Séance 33 · TP 3</p>
+        <h1>Commandes internes</h1>
+        <p>Une commande interne s’exécute <em>dans</em> le processus nysh. Liste minimale d’un shell vivant :</p>
+        <table>
+          <thead><tr><th>Commande</th><th>Pourquoi elle est interne</th></tr></thead>
+          <tbody>
+            <tr><td><code>cd</code></td><td>change <code>ctx.cwd</code></td></tr>
+            <tr><td><code>export</code> / <code>unset</code></td><td>mutent <code>ctx.env</code></td></tr>
+            <tr><td><code>exit</code></td><td>termine le REPL</td></tr>
+            <tr><td><code>alias</code></td><td>mémoire du shell</td></tr>
+            <tr><td><code>echo</code>, <code>pwd</code></td><td>pratiques, et <code>echo</code> doit connaître <code>$?</code> après expansion</td></tr>
+          </tbody>
+        </table>
+        <p><code>cd -</code> revient à <code>OLDPWD</code>. C’est un détail, mais c’est exactement le genre de détail qui prouve qu’on a compris l’état du shell.</p>
+        <div class="callout lab">
+          <strong class="label">À faire</strong>
+          <code>cd playground && pwd && cd - && pwd</code>. Les deux <code>pwd</code> doivent afficher des chemins différents. Si ce n’est pas le cas, tu as spawn <code>cd</code>.
+        </div>
+      </article>
+
+      <article data-id="s33-8">
+        <p class="kicker">Séance 33 · TP 4</p>
+        <h1>Commandes externes et PATH</h1>
+        <p>Si le premier mot n’est pas un builtin, nysh cherche un exécutable :</p>
+        <ol>
+          <li>S’il contient un <code>/</code>, c’est un chemin (<code>./script.sh</code>, <code>/usr/bin/ls</code>).</li>
+          <li>Sinon, on parcourt <code>$PATH</code> dans l’ordre, et on prend le premier fichier exécutable.</li>
+          <li>Sinon : message <code>commande introuvable</code>, status <code>127</code>.</li>
+        </ol>
+        <p><code>type ls</code> et <code>which ls</code> rendent ce mécanisme visible. <code>type</code> dit aussi si c’est un alias ou un builtin — c’est un outil d’introspection, pas un gadget.</p>
+        <pre><code>nysh$ type cd
+cd est une commande interne du shell
+nysh$ type ls
+ls est /usr/bin/ls</code></pre>
+        <p>Le fils hérite de <code>cwd</code> et de <code>env</code>. C’est pour ça qu’après <code>export FOO=1</code>, un <code>python3 -c 'import os; print(os.environ["FOO"])'</code> affiche <code>1</code>.</p>
+      </article>
+
+      <article data-id="s33-9">
+        <p class="kicker">Séance 33 · clôture</p>
+        <h1>Bilan de la séance 33</h1>
+        <p>À ce stade, nysh est déjà un shell : il lit, il parse, il change de dossier, il lance de vrais binaires Linux.</p>
+        <h2>Checklist</h2>
+        <ul>
+          <li>Prompt <code>user@host:dir$</code> qui suit <code>cd</code>.</li>
+          <li><code>echo</code>, <code>pwd</code>, <code>cd</code>, <code>exit</code>, <code>help</code>.</li>
+          <li><code>ls</code>, <code>cat</code>, <code>node</code> — tout ce qui est dans le PATH.</li>
+          <li>Quotes simples et doubles.</li>
+          <li>Code 127 si la commande n’existe pas.</li>
+        </ul>
+        <h2>Pour la prochaine fois</h2>
+        <p>Une ligne comme <code>cat notes.txt | grep nysh &gt; trouve.txt</code> exige de recabler les descripteurs. C’est le sujet de la séance 34 : Linux n’est plus « des commandes », c’est un graphe de flux.</p>
+        <pre><code># Mini-devoir
+# 1. Expliquer en 8 lignes pourquoi cd ne peut pas être spawn.
+# 2. Ajouter un builtin `true` / `false` si tu les as retirés.
+# 3. Lire src/tokenizer.js et annoter les opérateurs.</code></pre>
+      </article>
+
+      <article data-id="s34-1">
+        <p class="kicker">Séance 34 · leçon 1</p>
+        <h1>Carte du code</h1>
+        <p>On reprend le même dépôt. La séance 34 n’ajoute pas un nouveau projet : elle branche les tuyaux.</p>
+        <table>
+          <thead><tr><th>Fichier</th><th>Ce qu’on y étend</th></tr></thead>
+          <tbody>
+            <tr><td><code>parser.js</code></td><td>redirections, pipes, <code>&amp;&amp;</code> <code>||</code> <code>;</code> <code>&amp;</code></td></tr>
+            <tr><td><code>expander.js</code></td><td><code>$VAR</code>, <code>$?</code>, <code>~</code>, globs <code>*</code> <code>?</code></td></tr>
+            <tr><td><code>executor.js</code></td><td>fd, pipes, spawn</td></tr>
+            <tr><td><code>history.js</code> / <code>completer.js</code></td><td>confort d’un vrai tty</td></tr>
+          </tbody>
+        </table>
+        <p>Grille mentale de la grammaire :</p>
+        <div class="flow">ligne     = and_or ( ';' and_or )*
+and_or    = pipeline ( '&&' | '||' pipeline )*
+pipeline  = command ( '|' command )*
+command   = mots  redirections</div>
+        <p>On parse d’abord la structure (opérateurs), on expanse ensuite les mots. Inverser cet ordre casserait <code>echo $x | cat</code> si <code>$x</code> contenait un <code>|</code>.</p>
+      </article>
+
+      <article data-id="s34-2">
+        <p class="kicker">Séance 34 · leçon 2</p>
+        <h1>Descripteurs 0, 1 et 2</h1>
+        <p>Chaque processus naît avec trois descripteurs :</p>
+        <table>
+          <thead><tr><th>fd</th><th>Nom</th><th>Par défaut</th></tr></thead>
+          <tbody>
+            <tr><td>0</td><td>stdin</td><td>clavier</td></tr>
+            <tr><td>1</td><td>stdout</td><td>écran</td></tr>
+            <tr><td>2</td><td>stderr</td><td>écran (séparé, pour ne pas polluer les pipes)</td></tr>
+          </tbody>
+        </table>
+        <p>Rediriger, c’est substituer un fichier (ou un pipe) à l’un de ces trois fd <em>avant</em> d’exécuter la commande. Le programme, lui, continue d’écrire sur 1 : il ne sait pas si 1 est un terminal ou <code>out.txt</code>.</p>
+        <p>C’est pour ça que <code>ls &gt; fichiers.txt</code> ne demande aucune option spéciale à <code>ls</code>. Le shell a changé le décor, pas le rôle.</p>
+        <div class="callout lab">
+          <strong class="label">Expérience</strong>
+          Dans nysh : <code>echo visible &gt; playground/out.txt</code> puis <code>cat playground/out.txt</code>. Ensuite <code>ls /dossier-absent 2&gt; playground/err.txt</code> — le message d’erreur n’apparaît plus à l’écran.
+        </div>
+      </article>
+
+      <article data-id="s34-3">
+        <p class="kicker">Séance 34 · leçon 3</p>
+        <h1>Redirections</h1>
+        <p>nysh implémente le kit POSIX usuel :</p>
+        <table>
+          <thead><tr><th>Syntaxe</th><th>Effet</th></tr></thead>
+          <tbody>
+            <tr><td><code>cmd &gt; f</code></td><td>stdout écrase f</td></tr>
+            <tr><td><code>cmd &gt;&gt; f</code></td><td>stdout ajoute à f</td></tr>
+            <tr><td><code>cmd &lt; f</code></td><td>stdin lit f</td></tr>
+            <tr><td><code>cmd 2&gt; f</code></td><td>stderr écrase f</td></tr>
+            <tr><td><code>cmd 2&gt;&gt; f</code></td><td>stderr ajoute à f</td></tr>
+          </tbody>
+        </table>
+        <p>Dans l’exécuteur, on <code>openSync</code> le fichier avec le bon flag (<code>w</code>, <code>a</code>, <code>r</code>) et on passe le <strong>numéro de descripteur</strong> à <code>spawn</code>. Pas besoin de recopier les octets nous-mêmes : le noyau écrit directement dans le fichier.</p>
+        <pre><code>const fd = fs.openSync(file, "w");
+spawn("ls", [], { stdio: ["inherit", fd, "inherit"] });</code></pre>
+        <div class="callout piege">
+          <strong class="label">Piège</strong>
+          Fermer le fd trop tôt (avant la fin du fils) coupe l’écriture. Attendre l’événement <code>close</code> du processus, puis fermer notre copie du descripteur.
+        </div>
+      </article>
+
+      <article data-id="s34-4">
+        <p class="kicker">Séance 34 · leçon 4</p>
+        <h1>Pipes</h1>
+        <p>Un pipe est un tampon noyau avec deux bouts : on écrit à gauche, on lit à droite. La ligne</p>
+        <pre><code>echo hello-pipe | cat</code></pre>
+        <p>veut dire : stdout de <code>echo</code> = bout écriture, stdin de <code>cat</code> = bout lecture. Plus d’écran au milieu.</p>
+        <p>En Node, un <code>PassThrough</code> joue ce rôle pédagogique. On lance les commandes du pipeline <em>en parallèle</em> (<code>Promise.all</code>) : si on attendait la fin de la première avant de démarrer la seconde, un pipe plein bloquerait l’écrivain pour toujours (deadlock classique).</p>
+        <p>Les builtins dans un pipe doivent écrire dans le tuyau, pas sur le terminal — et appeler <code>.end()</code> pour envoyer EOF, sinon <code>cat</code> attend indéfiniment.</p>
+        <div class="callout lab">
+          <strong class="label">À faire</strong>
+          <code>echo hello-pipe | cat &gt; playground/pipe.txt</code> puis <code>cat playground/pipe.txt</code>. Enchaîne <code>ls | grep src | wc -l</code> (binaires du système, pas des builtins).
+        </div>
+      </article>
+
+      <article data-id="s34-5">
+        <p class="kicker">Séance 34 · leçon 5</p>
+        <h1>Environnement et expansions</h1>
+        <p>Avant d’exécuter, chaque mot passe dans <code>expander.js</code>, dans cet ordre :</p>
+        <ol>
+          <li><strong>Variables</strong> : <code>$NAME</code>, <code>${NAME}</code>, <code>$?</code> (dernier status), <code>$$</code> (PID).</li>
+          <li><strong>Tilde</strong> : <code>~</code> → <code>$HOME</code>.</li>
+          <li><strong>Globbing</strong> : <code>*</code> et <code>?</code>, seulement hors quotes.</li>
+        </ol>
+        <pre><code>export PROJET=nysh
+echo "cours $PROJET"     # cours nysh
+echo '$PROJET'           # $PROJET
+echo *.js                # fichiers .js du cwd
+echo $?</code></pre>
+        <p><code>export</code> écrit dans <code>ctx.env</code>, objet que l’on passe à <code>spawn</code>. Un fils Python ou un <code>bash -c</code> voit donc les mêmes variables. <code>unset</code> les retire.</p>
+        <p>Les quotes simples gèlent tout. Les doubles gardent les espaces et expansent les dollars. C’est le contrat que les utilisateurs de bash ont dans les doigts : le respecter, c’est déjà faire un vrai shell.</p>
+      </article>
+
+      <article data-id="s34-6">
+        <p class="kicker">Séance 34 · leçon 6</p>
+        <h1>Opérateurs de contrôle</h1>
+        <table>
+          <thead><tr><th>Opérateur</th><th>Sémantique</th></tr></thead>
+          <tbody>
+            <tr><td><code>;</code></td><td>enchaîner, toujours</td></tr>
+            <tr><td><code>&amp;&amp;</code></td><td>n’exécuter la suite que si status == 0</td></tr>
+            <tr><td><code>||</code></td><td>n’exécuter la suite que si status != 0</td></tr>
+            <tr><td><code>&amp;</code></td><td>lancer en arrière-plan, rendre le prompt tout de suite</td></tr>
+          </tbody>
+        </table>
+        <pre><code>true && echo OUI
+false && echo NON      # silence
+false || echo FALLBACK
+pwd ; echo ensuite</code></pre>
+        <p>Ces opérateurs travaillent sur le <em>status</em>, pas sur le texte affiché. <code>false</code> peut ne rien imprimer et quand même valoir 1. D’où les builtins <code>true</code> et <code>false</code> : ce sont des outils pédagogiques, pas des gadgets.</p>
+      </article>
+
+      <article data-id="s34-7">
+        <p class="kicker">Séance 34 · leçon 7</p>
+        <h1>Signaux, historique, complétion</h1>
+        <h2>Signaux</h2>
+        <p>Ctrl+C envoie SIGINT. Un shell interactif ne doit <em>pas</em> mourir : il abandonne la ligne, affiche un nouveau prompt. Ctrl+D (EOF sur une ligne vide) quitte — comme bash.</p>
+        <p><code>readline</code> émet <code>SIGINT</code> sur l’interface. nysh réaffiche le prompt au lieu d’appeler <code>process.exit</code>.</p>
+        <h2>Historique</h2>
+        <p>Les flèches haut/bas viennent de readline. On persiste en plus dans <code>~/.nysh_history</code> pour retrouver les commandes d’une session à l’autre. <code>history</code> les liste.</p>
+        <h2>Complétion</h2>
+        <p>Tab complète : d’abord les builtins et le PATH si on est sur le premier mot, sinon les fichiers du cwd. Les dossiers reçoivent un <code>/</code> final, comme dans bash.</p>
+        <p>Les alias (<code>ll=ls -al</code> est prédéfini) se développent avant l’exécution. <code>type ll</code> le montre.</p>
+      </article>
+
+      <article data-id="s34-8">
+        <p class="kicker">Séance 34 · TP final</p>
+        <h1>Assembler le shell complet</h1>
+        <p>Scénario à jouer dans nysh, sans tricher avec bash :</p>
+        <pre><code>cd playground
+echo "nysh est un shell" > notes.txt
+cat notes.txt | grep nysh
+export PROJET=IW-33-34
+echo "cours $PROJET" >> notes.txt
+cat notes.txt
+true && echo OK
+false || echo KO
+ls *.txt
+type cd
+type ls
+help
+exit</code></pre>
+        <p>Fichier script : <code>node src/index.js playground/demo.nysh</code>.</p>
+        <div class="callout lab">
+          <strong class="label">Extensions possibles</strong>
+          <code>2&gt;&amp;1</code>, heredocs <code>&lt;&lt;</code>, jobs <code>fg</code>/<code>bg</code>, glob <code>**</code>, substitution de commande <code>$(...)</code>. Chacune est un bon sujet de bonus, pas un prérequis du rendu.
+        </div>
+      </article>
+
+      <article data-id="s34-9">
+        <p class="kicker">Séance 34 · ouverture</p>
+        <h1>Au-delà de nysh</h1>
+        <p>bash, dash, zsh, fish : tous parlent à peu près POSIX, puis ajoutent des dialectes. Ce que nysh a volontairement laissé de côté :</p>
+        <ul>
+          <li>fonctions shell, <code>if</code>/<code>for</code>/<code>while</code> ;</li>
+          <li>job control complet (Ctrl+Z, <code>jobs</code>) ;</li>
+          <li>expansion arithmétique <code>$((1+1))</code> ;</li>
+          <li>coprocessus, process substitution <code>&lt;(cmd)</code>.</li>
+        </ul>
+        <p>Ce n’est pas un échec : c’est le périmètre d’un atelier. En deux séances, tu as reconstruit la boucle qui fait tourner Linux au quotidien — lire une ligne, la comprendre, recabler 0/1/2, attendre un status.</p>
+        <p>Le meilleur test n’est pas « est-ce identique à bash ? ». C’est : <em>est-ce que je peux expliquer chaque caractère d’une ligne comme <code>ls | grep js &gt; out && echo ok</code> ?</em> Si oui, le cours a tenu sa promesse.</p>
+        <pre><code>nysh$ echo "fin du cours $?" 
+# et maintenant, relis src/executor.js à voix haute.</code></pre>
+      </article>
+
+      <div class="pager">
+        <button type="button" data-prev>← Précédent</button>
+        <button type="button" data-next>Suivant →</button>
+      </div>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

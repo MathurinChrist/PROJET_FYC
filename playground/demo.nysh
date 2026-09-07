@@ -1,0 +1,18 @@
+# Démo nysh — à lancer avec :
+#   node src/index.js playground/demo.nysh
+# ou, une fois dans le shell :
+#   source playground/demo.nysh
+
+echo "== nysh · démonstration séances 33 & 34 =="
+pwd
+echo "fichier de notes" > playground/notes.txt
+echo "nysh est un shell Linux écrit en Node.js" >> playground/notes.txt
+cat playground/notes.txt | grep nysh
+export PROJET=IW-33-34
+echo "cours $PROJET"
+true && echo "&& : succès"
+false || echo "|| : repli"
+ls playground/*.txt
+type cd
+type ls
+echo "== fin =="

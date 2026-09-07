@@ -1,0 +1,4 @@
+node_modules/
+.nysh_history
+*.log
+.DS_Store

@@ -1,0 +1,2 @@
+fichier de notes
+nysh est un shell Linux écrit en Node.js

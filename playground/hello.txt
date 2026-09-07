@@ -1,0 +1,2 @@
+nysh — notes du playground
+Ce fichier sert aux TP de redirection et de grep.

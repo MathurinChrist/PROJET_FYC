@@ -1,0 +1,25 @@
+{
+  "name": "nysh",
+  "version": "1.0.0",
+  "description": "NYSH — Shell Linux pédagogique écrit en Node.js (IW 33 & 34)",
+  "type": "module",
+  "bin": {
+    "nysh": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test tests/*.test.js",
+    "cours": "node scripts/serve-cours.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "shell",
+    "linux",
+    "nodejs",
+    "cli",
+    "education"
+  ],
+  "license": "MIT"
+}
